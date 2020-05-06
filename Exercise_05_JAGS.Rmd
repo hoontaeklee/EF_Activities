@@ -1,7 +1,9 @@
 ---
 title: "Introduction to JAGS"
 author: "Michael Dietze"
-output: html_document
+output:
+  pdf_document: default
+  html_document: default
 ---
 
 ```{r,echo=FALSE}
@@ -377,4 +379,124 @@ Using the dataset "data/Ex05.Part2.RData", extend your univariate regression to 
 * Report parameter summary table. 
 * Plot marginal parameter distributions and pairwise parameter correlations (stats and scatter plots).
 
+#### specify model
 
+```{r}
+multivariate_regression <- 
+"
+model{
+b ~ dmnorm(b0, Vb)
+S ~ dgamma(s1, s2)
+
+for(i in 1:n){
+mu[i] <- b[1] + b[2] * x1[i] + b[3] * x2[i] + b[4] * x1[i] * x2[i]  # process model
+y[i] ~ dnorm(mu[i], S)  # data model
+}
+}
+"
+```
+
+#### Load data
+
+```{r}
+load("data/Ex05.Part2.RData")
+```
+
+```{r}
+data <- list(x1 = x1, 
+             x2 = x2, 
+             y = y, 
+             n = length(y))
+```
+
+#### Specify priors
+
+```{r}
+data$b0 <- as.vector(c(0, 0, 0, 0))  # regression b means
+data$Vb <- solve(diag(10000, 4))  # regression b precisions, dimension = 4
+data$s1 <- 0.1  # error prior n/2
+data$s2 <- 0.1  # error prior SS/2
+```
+
+#### Initial conditions
+
+```{r}
+nchain <- 5
+inits <- list()
+for(i in 1:nchain){
+  inits[[i]] <- list(b = rnorm(4, 0, 5),  # dimension = 4 (b0, b1, b2, b3)
+                     S = runif(1, 1/200, 1/20))
+}
+```
+
+#### Running JAGS
+
+```{r}
+# compile and initialize
+j.model <- jags.model(file = textConnection(multivariate_regression),
+                      data = data,
+                      inits = inits,
+                      n.chains = nchain)
+
+# sample
+jags.out <- coda.samples(model = j.model,
+                         variable.names = c("b", "S"),  # var. names in the inits
+                         n.iter = 5000)
+```
+
+#### Evaluating MCMC outputs
+
+```{r}
+# convergence - visual assessment
+plot(jags.out)  # overlapping & randomly bouncing -> looks converged
+
+# convergence - Brooks-Gelman-Rubin (BGR) statistics
+gelman.diag(jags.out)  # less than 1.01 -> excellent!
+```
+
+```{r}
+# define the "burn in" period
+BGR <- gelman.plot(jags.out)  # BGR > 1.05 = burn-in period
+```
+
+```{r}
+# remove the "burn-in" period
+burnin <- 500
+jags.burn <- window(jags.out,
+                    start = burnin)
+plot(jags.burn)
+```
+```{r}
+# sample size
+acfplot(jags.burn)
+```
+```{r}
+effectiveSize(jags.burn)
+```
+
+#### MCMC Statistics
+
+```{r}
+summary(jags.burn)
+```
+
+```{r}
+# compare with frequentist method (i.e. classic linear regression)
+summary(lm(y ~ x1 * x2, data = data.frame(x1 = data[[1]],
+                                          x2 = data[[2]],
+                                          y = data[[3]])
+           )
+        )
+
+# Almost the same results (mean & uncertainty of each parameter estimate)
+
+```
+
+```{r}
+# correlations among parameters
+pairs(as.matrix(jags.burn))
+```
+
+```{r}
+cor(as.matrix(jags.burn))
+```
